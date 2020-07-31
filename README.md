@@ -8,3 +8,5 @@ As part of my course, Regression Analysis of Temporal Processes, I completed the
 
 
 2. I performed regressions--OLS, Random Effects, and Fixed Effects--on GSS data using R.
+
+3. I performed a multivariate Time Series and used ARIMA on GSS data using R.
