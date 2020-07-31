@@ -1,0 +1,237 @@
+---
+title: "Time Series Lab 1"
+author: "Montsie Guerrero"
+date: "9/26/2019"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+1. Conduct a trend analysis of some variable of interest. Graph it and try different functional forms. Look for subgroup variation across time, too.
+
+How has belief in the existence of God changed across time in the USA? In particular, I would like to explore the variable **god** from the GSS which answers the question, "Which statement comes closest to expressing what you believe about God?". Responses were made on a 1-6 scale: I don't believe in God (1), I don't now whether there is a God, and I don't believe there is any way to find out (2), I don't believe in a personal God, but do believe in a Higher Power of some kind (3), I find myself believing in God some of the time, but not at others (4), While I have doubts, I feel that I do believe in God (5), I know God really exists and I have no doubts about it (6).
+
+```{r, include=FALSE}
+library(QMSS)
+library(tidyverse)
+gss = read.csv("trends-gss.csv")
+GSS = gss
+sub <- GSS %>%
+  select(god, year, partyid, degree, sex)
+sub$sex = ifelse((sub$sex==2), 1, 0)
+```
+
+```{r, include=TRUE}
+Tab(sub$god)
+```
+For all the years (1988-2012), about 62.62% of respondents do believe in God and have no doubts about it. But how does this change throughout the years?
+
+# Data Visualization of Belief in God (1988-2012)
+Across time, belief in God has fluctuated as illustrated by the graph:
+```{r, include = TRUE}
+sub <- na.omit(sub)
+library(plyr)
+by.year <- ddply(sub,"year", summarize, mean = mean(god))
+library(ggplot2)
+g_by.year <- ggplot(by.year, aes(x=year, y=mean)) + geom_line(color = "navyblue")
+g_by.year
+```
+
+As shown, belief in God has declined in the US since 1988 until the late 1990s. There is a sudden rise in the graph from around 1998-2000 then a gradual decline from that year on until 2010.
+
+# Linear Regression
+
+I will first try to fit a linear regressionnmodel to try to explain the data.
+```{r, include = TRUE}
+g_by.year + stat_smooth(method = "lm", se = FALSE, color = "maroon", lty = 2)
+```
+
+# Linear Regression (Fitting a Line)
+```{r, include = TRUE}
+lm.god <- lm(god ~ year, data = sub)
+summary(lm.god)
+```
+This model shows that with each year that passes, there is a 0.008 point decrease in the belief in God (on a 6 point scale). The p-value is statistically significant (p<0.05). The adjusted R-sq is 0.002 meaning the model can explain 0.2% of the variation in belief in God with the time trend, which is quite low.
+
+# Test for Heteroskedasticity
+```{r, include = TRUE}
+library(lmtest)
+bptest(lm.god)
+```
+With a p-value <0.001, the data is significantly heterodeskedastic. This would mean that the variable year is causing heteroskedasticity in the regression. This is important to consider because heteroskedasticity leads to inappropriate standard errors.
+
+
+# OLS
+```{r, include = FALSE}
+library(rms)
+```
+
+It would be good to apply robust standard errors.
+
+```{r, include=TRUE}
+ols.god <- ols(god ~ year, data = sub, x = T, y= T)
+robcov(ols.god)
+```
+Now, the t-statistic is -6.85 compared to the t-statistic of -6.77 in naive OLS. There is virtually no difference in t-score value.
+
+# Linear Regression with Dummy Variable
+```{r, include = TRUE}
+ols.god2 <- lm(god ~ as.factor(year), data = sub)
+summary(ols.god2)
+```
+When dummy variables for year are applied, the model shows that relative to 1988, belief in God dropped by -0.15 points in 1998 (on a 6 point scale). The adjusted R-sq is 0.003, which means the model explains 0.3% of the variation in the belief in God. It is a better model than the simple linear regression but testing other kinds of models may lead to a better fit.
+
+# Linear Hypothesis Test
+```{r, include = TRUE}
+linearHypothesis(ols.god2, "as.factor(year)2000 = as.factor(year)2010")
+```
+The F-test for whether belief in God in 2000 (B = -0.016) is different from 2010 (B=-0.252) indicates a change, as the p-value on the F-statistic is highly statistically significant (p<0.001). We rejct the null hypothesis that belief in God in 2000 shows no change compared to 2010.
+
+# Periodization Regression Test
+```{r, include = TRUE}
+sub$late = ifelse((sub$year>2000), 1, 0)
+lm.god.period = lm(god ~ late, data = sub)
+summary(lm.god.period)
+```
+It may be good to separate time into a period before 2000 and a period after 2000 and run a regression. This model shows that for 2000 and after, people's belief in God on average drops by -0.12 points (on a 6 point scale), relative to the period before 2000. The adjusted R-sq is 0.001, which is lower than the adj. R-sq for the linear regression with dummy variables.
+
+
+# Quadratic Regression
+```{r, include = TRUE}
+g_by.year + stat_smooth(method = "lm", formula = y ~ poly(x,2), se = FALSE, color = "maroon", lty = 2)
+```
+
+# Quadratic Regression Test
+```{r, include = TRUE}
+lm.ngodsq = lm(god ~ year + I(year^2), data = sub)
+summary(lm.ngodsq)
+```
+
+At first, belief in God rises (indicated by the positive coefficient on year) then declines (inidicated by the negative coefficient in year^2). The adjusted R-sq is 0.002 which is quite low. The adjusted R-sq is 0.002 which is still quite low and may not be the best fit for the data.
+
+
+# Cubic Regression
+```{r, include = TRUE}
+g_by.year + stat_smooth(method = "lm", formula = y ~ poly(x,3), se = FALSE, color = "maroon", lty = 2)
+```
+
+# Cubic Regression Test
+```{r, include = TRUE}
+lm.godcu = lm(god ~ year + I(year^2) + I(year^3), data = sub)
+summary(lm.godcu)
+```
+
+At first, belief in God declines (indicated by the positive coefficient on year), but then it rises (positive coefficient of year^2) and declines again (negative coefficient of year^3). The adjusted R-sq is quite low at 0.003. A look at subgroup variations may lead to a better model of the data.
+
+# Subgroup Variation Across Time (Political Party)
+
+Does belief in the existence of God differ among people who are affiliated with a political party (over a period of 20 or so years i.e. 1988 to 2012)? I wanted to see the differences in the belief of God among respondents who belong to a particular political party. Here, I filtered out the **partyid** variable, only retaining: Strong Democrat (0), Independent (3), and Republican (6) for purposes of analysis of the 3 main parties.
+
+```{r, include = TRUE}
+sub2 <- sub %>%
+  filter(partyid == 0 | partyid == 3 | partyid == 6)
+by.year.partyid <- ddply(sub2, c("year","partyid"), summarise, mean = mean(god, na.rm =T))
+colors_and_labels <- scale_color_manual(values = c("navyblue","black", "darkred"), labels = c("Strong Democrat", "Independent","Strong Republican"), name = "")
+g_by.year.partyid <- ggplot(by.year.partyid, aes(x=year, y=mean, group=partyid, color=factor(partyid)))
+g_by.year.partyid <- g_by.year.partyid + geom_line()
+g_by.year.partyid + colors_and_labels
+```
+
+# Fitting a line on partyid
+```{r, include = TRUE}
+g_linear <- g_by.year.partyid + stat_smooth(method = "lm", se = FALSE, lty = 2)
+g_linear + colors_and_labels
+```
+
+# Quadratic Fit based on partyid
+```{r}
+g_quad <- g_by.year.partyid + stat_smooth(method = "lm", formula = y ~ poly(x,2), se = FALSE, lty = 2)
+g_quad + colors_and_labels
+```
+
+After running regressions for each party, the p-value for year^2 is > 0.05 for Democrat and Republican. Only Independent had p-value <0.05 (statistically significant). But all 3 regressions had low adj. R-sq of 0.007 (Democrat), 0.002 (Independent), and 0.0007 (Republican), suggesting that the quadratic model does not fully explain the variation in the data. (See tests below.)
+
+# Quadratic Regression Tests
+*Democrat*
+```{r}
+sub2$yearsq = sub2$year*sub2$year
+lm_quad = lm(god ~ year + yearsq, sub2, subset= partyid == 0)
+summary(lm_quad)
+```
+
+*Independent*
+```{r}
+sub2$yearsq = sub2$year*sub2$year
+lm_quad = lm(god ~ year + yearsq, sub2, subset= partyid == 3)
+summary(lm_quad)
+```
+
+*Republican*
+```{r}
+sub2$yearsq = sub2$year*sub2$year
+lm_quad = lm(god ~ year + yearsq, sub2, subset= partyid == 6)
+summary(lm_quad)
+```
+
+
+# Individual Subsetted Linear Regressions
+
+Now, I will run a regression for each category of partyid separately.
+
+*Democrat OLS Linear Regression*
+```{r}
+ols.godD <- robcov(ols(god ~ year, data = sub2, partyid == 0, x = T, y=T))
+robcov(ols.godD)
+```
+
+With each year that passes, the belief in God of members of the Democratic party drops by -0.0153 points (on a 6 point scale).
+
+*Independent OLS Linear Regression*
+```{r}
+ols.godI <- robcov(ols(god ~ year, data = sub2, partyid == 3, x = T, y=T))
+robcov(ols.godI)
+```
+
+With each year that passes, the belief in God for members of the Independent party drops by -0.005 points (on a 6 point scale).
+
+*Republican OLS Linear Regression*
+```{r}
+ols.godI <- robcov(ols(god ~ year, data = sub2, partyid == 6, x = T, y=T))
+robcov(ols.godI)
+```
+
+With each year that passes, the belief in God for members of the Republican party increases by 0.0055 points (on a 6 point scale).
+
+
+# Periodization by Political Party Affiliation (with Interaction terms)
+```{r, include = TRUE}
+sub$late=ifelse((sub$year>2000), 1,0)
+lm.god.period.int = lm(god ~ late*as.factor(partyid), data = sub2)
+summary(lm.god.period.int)
+```
+
+The results indicate that in the earlier period, Independent party members were 0.191 points less likely to believe in God than Democratic party members and Republican party members were 0.196 points more likely to believe in God than Democratic party members. Democratic party members' belief in God dropped by -0.22 points in the later period. Independent party members' belief in God fell 0.05 points (= -0.22+0.16) in the later period while Republican party members' belief in God increased by 0.08 points (= -0.22+0.30) in the later period. The first interaction term is statistically significant (p<.05) and the second one is highly statistically significant (p<0.001). So, the interaction terms are appropriate here. This suggests a partisan 'God gap' where Republicans are seen to be most likely to believe in God while Democrats are least likely among the three, especially in the later period. The adjusted R-sq, 0.02, is substantially higher than the periodization regression model (adj. R-sq = 0.001) because party affiliation is a strong predictor of belief in God. This suggests that this linear regression model with interaction terms can explain 2 percent of the variation in belief in God with our time trend.
+
+
+In conclusion, members of political parties have a noticeable difference in their belief in God over time. The increasing gap in this trend among Republicans (who increasingly believe in God as time passes) and Democrats and Independents (whose belief in God has declined over the years) may suggest the more prominent divide in this country between secular and spiritual worldviews. It is also evidence of political polarization wherein a person's belief may be influenced by the party they are affiliated with.
+
+# Multiple Linear Regression
+```{r}
+lm.multiple <- lm(god ~ year + sex + degree + partyid, data = sub)
+summary(lm.multiple)
+```
+
+Maybe belief in God is affected by other independent variables? Here, I tried a multiple linear regression on the following independent variables: sex, year, partyid (party affiliation), and degree. Based on the results, as a year passes, there is a -0.005 point decrease in the belief in God. If a person is female (female = 1), there is a 0.47 point increase in the belief in God. If a person has a degree, there is a -0.17 decrease in the belief in God. If a person is not a Democrat (partyid = 0), there is a 0.055 increase in the belief in God. The p-values for the coefficients are statistically significant. The adj. R-sq is 0.06 which means the model explains 6 percent of the variation in the data--a better fit compared to previous models. This indicates that adding multiple variables can better explain the belief in God in the US.
+
+
+
+
+
+
+
+
+

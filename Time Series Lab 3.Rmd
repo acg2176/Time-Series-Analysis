@@ -1,0 +1,443 @@
+---
+title: "Time Series Lab 3"
+author: "Montsie Guerrero"
+date: "11/20/2019"
+output:
+  html_document:
+    toc: yes
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1. Create a multivariate time series; perform any interpolations. 
+
+I wanted to look at how the views on premarital sex (i.e. sex before marriage) has changed over the course of time, specifically from 1988-2012. The dependent variable I used is **premarsx** which asks, "If a man and woman have sex relations before marriage, do you think it is always wrong, almost always wrong, wrong only sometimes or not wrong at all?" on a scale of 1-4, with 4 being always wrong and 1 being not wrong at all. The independent variables to be considered are one's belief in God (**faith**), identification as a Democrat (**partyid**), have liberal views (**polviews**), and attendance at religious service (**attend**). These variables may affect one's view on premarital sex over the years. 
+
+
+```{r, include = FALSE}
+library(QMSS)
+library(tidyverse)
+library(ggplot2)
+library(plyr)
+library(dplyr)
+library(car)
+library(fUnitRoots)
+library(lmtest)
+```
+
+```{r}
+GSS = read.csv("trends-gss.csv")
+
+vars <- c("year", "premarsx", "sex", "partyid", "god", "polviews", "attend")
+sub <- GSS[, vars]
+
+sub <- mutate(sub, 
+              premar = ReverseThis(premarsx), #4 is always wrong 0 is not wrong at all
+              faith = ifelse(god >= 4, 1, 0),  #believe in God is 1, don't believe in God is 0
+              nsex = ifelse(sex == 2, 1, 0), #woman is 1, man is 0
+              partyid0 = ifelse(partyid == 0, 1,0), #dem is 1
+              partyid1 = ifelse(partyid == 1, 1, 0),
+              polviews1 = ifelse(polviews == 1, 1, 0), #liberal is 1
+              polviews2 = ifelse(polviews == 2, 1, 0),
+              polviews3 = ifelse(polviews == 3, 1, 0)) 
+
+by.year <- aggregate(subset(sub, sel = -year), list(year = sub$year), mean, na.rm = T)
+
+by.year[30:40, "year"] <- c(1979, 1981, 1992, 1995, seq(1997, 2009, 2))
+by.year <- arrange(by.year, year)
+
+by.year.ts <- ts(by.year)
+by.year.ts <- na.approx(by.year.ts)
+
+by.year.ts <- as.data.frame(by.year.ts)
+by.year.ts <- mutate(by.year.ts,
+                     dem = partyid0 + partyid1,
+                     dem_pct = dem*100,
+                     faith_pct = faith*100,
+                     lib = polviews1 + polviews2 + polviews3,
+                     lib_pct = lib*100)
+by.year.ts <- ts(subset(by.year.ts, year >= 1988))
+
+
+```
+
+Correlation of Variables
+```{r}
+cor.vars <- c("premar", "dem_pct", "faith_pct", "lib_pct", "year", "attend") #non binary variables
+cor.dat <- by.year.ts[, cor.vars]
+cor(cor.dat, use= "complete")
+```
+
+Plot of Correlated Variables
+```{r}
+library(corrplot)
+corrplot(cor(cor.dat, use="complete"))
+```
+
+
+
+
+# 2. Graph the relationships between X and Y.  Explain how you think Y should relate to your key Xs.
+
+If one believes in God **faith_pct**, there would be a positive correlation with **premarsx**. If one is a Democrat **dem_pct**, there would be a negative correlation with **premarsx**. If one has liberal views **lib_pct**, there would be a negative correlation with **premarsx**. If one frequently goes to religious services, there will be a positive correlation with **premarsx**.
+
+```{r}
+meltMyTS <- function(mv.ts.object, time.var, keep.vars){
+  # mv.ts.object = a multivariate ts object
+  # keep.vars = character vector with names of variables to keep 
+  # time.var = character string naming the time variable
+  require(reshape2)
+  
+  if(missing(keep.vars)) {
+    melt.dat <- data.frame(mv.ts.object)
+  }
+  else {
+    if (!(time.var %in% keep.vars)){
+      keep.vars <- c(keep.vars, time.var)
+    }
+    melt.dat <- data.frame(mv.ts.object)[, keep.vars]
+  }
+  melt.dat <- melt(melt.dat, id.vars = time.var)
+  colnames(melt.dat)[which(colnames(melt.dat) == time.var)] <- "time"
+  return(melt.dat)
+}
+
+keep.vars <- c("premar", "dem_pct", "faith_pct", "lib_pct", "year", "attend")
+
+plot.dat <- meltMyTS(mv.ts.object = by.year.ts, time.var = "year", keep.vars = keep.vars)
+plot.dat
+```
+
+```{r}
+ggMyTS <- function(df, varlist, line = TRUE, point = TRUE, pointsize = 3, linewidth = 1.25, ...){
+  require(ggplot2)
+  # varlist = character vector with names of variables to use
+  if(missing(varlist)){
+    gg <- ggplot(df, aes(time, value, colour = variable)) 
+  }
+  else{
+    include <- with(df, variable %in% varlist)
+    gg <- ggplot(df[include,], aes(time, value, colour = variable))   
+  }
+  if(line == FALSE & point == FALSE) {
+    stop("At least one of 'line' or 'point' must be TRUE") 
+  }
+  else{
+    if(line == TRUE) gg <- gg + geom_line(size = linewidth, aes(color = variable), ...)
+    if(point == TRUE) gg <- gg + geom_point(size = pointsize, aes(color = variable), ...)
+  }
+  
+  gg + xlab("") + theme(legend.position = "bottom") + scale_x_continuous(breaks = min(df$time):max(df$time))
+} 
+
+(g_premar <- ggMyTS(df = plot.dat, varlist = c("premar"))+ylab("View on Premarital Sex")+xlab("Years")+theme(axis.text.x = element_text(face="plain", color="black", angle=45)))
+```
+
+From 1988-2012, the view on premarital sex has declined. This means that people have grown desensitized to traditional sexual norms regarding marriage. Respondents increasingly believe that premarital sex is not wrong over this time period. The decline is most obvious for the years 2000-2012.
+
+
+```{r}
+(g_dem_pct <- ggMyTS(df = plot.dat, varlist = c("dem_pct"))+ylab("Percent Democrats")+xlab("Years")+theme(axis.text.x = element_text(face="plain", color="black", angle=45)))
+```
+
+The percentage of respondents who consider themselves as Democrat has varied over the years. There is a relative decline from 1988-2006, an increase from 2006-2008 then a slight decline then incline from 2008-2012. In 2012, the percent of Democrats was around 35.8%. Comparing the graph between the view that premarital sex is wrong and the percent of respondents who identify as Democrat, there is a weak negative correlation.
+
+```{r}
+(g_faith_pct <- ggMyTS(df = plot.dat, varlist = c("faith_pct"))+ylab("Percent Belief in God")+xlab("Years")+theme(axis.text.x = element_text(face="plain", color="black", angle=45)))
+```
+
+There is a relative decline in the belief in God (%) over the period 1988-2012. A decline from 1988-1998 is followed by an increasef from 1998-2000. Then, the belief in God (%) declines gradually until 2012, where it is at its lowest %. The decline of the belief in God from 1988-2012 shows a positive correlation with the views on premarital sex (i.e. people increasingly think it is wrong) from 1988-2012.
+
+```{r}
+(g_lib_pct <- ggMyTS(df = plot.dat, varlist = c("lib_pct"))+ylab("Percent Liberal")+xlab("Years")+theme(axis.text.x = element_text(face="plain", color="black", angle=45)))
+```
+
+The percentage of liberal thinking (identify oneself with liberal views) has varied over 1988-2012. There was a decline from 1988-1996, an increase from 1996-1998, a big decline from 1998-2004 then an increase from 2004-2012. This makes sense when one takes into account the political atmosphere in the US, as Democratic (more associated with liberal views) and Republicans (more associated with conservative views) have been in office interchangeable (e.g. Clinton in the late 1990s to Bush in the early 2000s). There is weakly negative correlation between the percent of respondents who have liberal political views and the view that premarital sex is wrong.
+
+```{r}
+(g_religious <- ggMyTS(df = plot.dat, varlist = c("attend"))+ylab("Degree of Religious Attendance")+xlab("Years")+theme(axis.text.x = element_text(face="plain", color="black", angle=45)))
+```
+
+The level of religious attendance has declined in general from 1988 to 2012. There was an increase in attendance from 2000 to 2004 but followed by a decline from 2004 to 2012. There is a positive correlation with the degree of religious attendance and the view that premarital sex is wrong.
+
+# 3. Run a simple time series regression, with one X and no trend.  Interpret it.
+
+How does one's belief in God affect one's views on premarital sex? I ran a simple time series regression.
+```{r}
+lm.premar <- lm(premar ~ faith_pct, data = by.year.ts)
+summary(lm.premar)
+
+```
+
+The results show that a 1 unit increase in the percentage of the belief in God leads to a 0.039 point increase in the view that premarital sex is wrong holding all other variables constant. The p-value is highly statistically significant. The null hypothesis is rejected.
+
+
+Test for Heteroskedasticity
+```{r}
+bptest(lm.premar)
+
+```
+With a p-value >0.05, the data is not significantly heteroskedastic. This would mean that the variable faith_pct is not causing heteroskedasticity in the regression.
+
+Autocorrelation Diagnostics
+```{r}
+e <- lm.premar$resid
+acf(e) 
+```
+
+
+```{r}
+acf(e, xlim = c(1,8), col = "red", lwd = 2)
+```
+
+Looking at the two correlograms, the autocorrelation coefficients at lower lags are positively associated with their recent past. As lags increase from lag 7 and beyond, the autocorrelation coefficients are negatively associated with their recent past.
+
+There is a significant spike at lag 1 and much lower spikes at the subsequent lags. An AR(1) model may be feasible for the data.
+
+```{r}
+plot(e) # plot residuals over time
+```
+
+
+Durbin-Watson Test
+```{r}
+dwtest(lm.premar) # Durbin-Watson test
+```
+
+The DW value is 0.77238, a number between 0-2, signifying that there is positive autocorrelation. The p-value of the Durbin-Watson test is <0.05. This means we can reject the null hypothesis. There is evidence of autocorrelation among the residuals.
+
+Breusch-Godfrey Test
+```{r}
+bgtest(lm.premar) # Breusch-Godfrey test
+```
+
+The p-value of the Breusch-Godfrey test is <0.05. It is statistically significant. We reject the null hypothesis that the regression has no serial correlation. There is evidence for serial correlation.
+
+Durbin-Watson Test with lags
+```{r}
+durbinWatsonTest(lm.premar, max.lag=3) # Durbin-Watson with more lags
+```
+
+The p-value of the Durbin-Watson Test at lag 1 is <0.05, signifying that it is statistically significant. This means we reject the null hypothesis. There is evidence for serial correlation and first-ordered autoregression, AR(1), has the strongest evidence. This is a problem because the estimated line from the OLS misses the trend. We can probably fit the data to a better model, taking the time trend into account.
+
+
+# 4. Run a time series regression with one X and trend.  Interpret it.  Perform autocorrelation diagnostics.  Explain what you found.
+
+I ran the same model but added the year trend.
+
+```{r}
+lm.premar2 <- update(lm.premar, ~ . + year)
+summary(lm.premar2)
+```
+
+Net of the year trend, each percent of one's view in the belief in God increases one's view that premarital sex is wrong by 0.03 points. The p-value is <0.05, meaning it is highly statistically significant. We reject the null hypothesis.
+
+As each year passes, there is a -0.003 point decrease in the view that premarital sex is wrong, holding all other variables constant. The p-value is not statistically significant (>0.05). We fail to reject the null hypothesis.
+
+
+Autocorrelation Test
+```{r}
+# look for autocorrelation
+e2 <- lm.premar2$resid
+acf(e2, xlim = c(1,8), col = "red", lwd = 2)
+```
+
+```{r}
+pacf(e2, xlim = c(1,8), col = "red", lwd = 2)
+```
+
+However, based on the acf and pacf graphs, it looks like there is still evidence of autocorrelation.
+
+```{r}
+plot(e2)
+```
+
+The residual plot still looks similar to the OLS regression with one X and no trend. It seems like no residuals were removed.
+
+Durbin-Watson Test
+```{r}
+dwtest(lm.premar2)
+```
+
+The DW value is 0.7, meaning it is still between 0 and 2, indicating that we reject the null hypothesis. This is shown also looking at the p-value is <0.05; it is statistically significant. Reject the null hypothesis that there is no autocorrelation. There is evidence for autocorrelation.
+
+Bresuch-Godfrey Test
+```{r}
+bgtest(lm.premar2)
+```
+
+The p-value of the Breusch-Godfrey test is <0.05. This is statistically significant. We reject the null hypothesis. There is evidence of serial correlation.
+
+Durbin Watson Test with lags
+```{r}
+durbinWatsonTest(lm.premar2, max.lag=3)
+```
+
+The p-value of the Durbin-Watson Test at lag 1 is <0.05, signifying that it is statistically significant. This means we reject the null hypothesis. There is evidence for serial correlation and first-ordered autoregression, AR(1), has the strongest evidence. We can probably fit the data to a better model.
+
+
+# 5. Consider running a time series regression with many Xs and trend.  Interpret that.  Check VIF.
+
+I updated the previous model by adding 3 more independent variables: lib_pct, dem_pct, attend.
+
+```{r}
+lm.premar3 <- update(lm.premar2, ~ . + lib_pct + dem_pct + attend)
+summary(lm.premar3)
+```
+
+A 1 percent increase in one's belief in God leads to a 0.025 point increase in the view that premarital sex is wrong, holding all other variables constant. The p-value is statistically significant (<0.001) so we can reject the null hypothesis.
+
+As each year passes, there is a -0.006 point decrease in the view that premarital sex is wrong, holding all other variables constant. The p-value is statistically significant (<0.01) so we can reject the null hypothesis.
+
+A 1 percent increase in one's liberal views leads to a 0.0045 increase in the view that premarital sex is wrong, holding all other variables constant. The p-value is not statistically significant (>0.05) so we fail to reject the null hypothesis.
+
+A 1 percent increase in one's identification as a Democrat leads to a -0.028 decrease in the view that premarital sex is wrong, holding all other variables constant. The p-value is statistically significant (<0.001) so we can reject the null hypothesis.
+
+And, a 1 point increase in one's religious attendance leads to a 0.016 increase in the view that premarital sex is wrong, holding all other variables constant. The p-value is not statistically significant (>0.05) so we fail to reject the null hypothesis.
+
+Variation Inflation Factor
+```{r}
+vif(lm.premar3) # variance inflation factor 
+```
+
+The VIF estimates how much the variance of a regression coefficient is inflated due to multicollinearity in the model. Given the VIF values of each predictor, there is a correlation between the predictors of the model. The VIF values for faith_pct, lib_pct, dem_pct, and attend range within 1-5, meaning they are moderately correlated. 
+
+The VIF value of year is greater than 5 meaning it is highly correlated. This may be a problem because multicollinearity increases the standared errors of the coefficients and this makes coefficients look statistically different from 0 (the null hypothesis).
+
+Durbin Watson Test with Lags
+```{r}
+durbinWatsonTest(lm.premar3, max.lag=2)
+```
+
+The DW value with lag 1 is 1.39. The p-value is <0.05, meaning it is statistically significant. We reject the null hypothesis. There is evidence of serial correlation.
+
+The DW value with lag 2 is 2.76. The p-value is >0.05, meaning it is not statistically significant. We fail to reject the null hypothesis. There is no evidence of autocorrelation.
+
+
+# 6. Run a first differenced time series regression.  Interpret that.  
+```{r}
+by.yearFD <- summarise(data.frame(by.year.ts), premar = firstD(premar), dem_pct = firstD(dem_pct), lib_pct = firstD(lib_pct), faith_pct = firstD(faith_pct), attend = firstD(attend), year = year)
+```
+First Differences Model
+
+Running a first difference model would be a possible solution to correct for autocorrelation.
+
+```{r}
+lm.premar5 <- update(lm.premar2,  ~ . + lib_pct + dem_pct + attend, data = by.yearFD)
+summary(lm.premar5)
+```
+
+A 1 percent increase in one's belief in God leads to a 0.019 point increase in the view that premarital sex is wrong, holding all other differences in the variables constant. The p-value is <0.01, meaning it is statistically significant. We reject the null hypothesis.
+
+As each year passes, there is a -0.0011 point decrease in the view that premarital sex, holding all other differences in the variables constant. The p-value is >0.05, meaning it is not statistically significant. We fail to reject the null hypothesis.
+
+A 1 percent increase in one's belief in liberal views leads to a 0.018 point increase in the view that premarital sex is wrong, holding all other differences in the variables constant. The p-value is <0.01, meaning it is statistically significant. We reject the null hypothesis.
+
+A 1 percent increase in one's identification as a Democrat leads to a -0.017 point decrease in the view that premarital sex is wrong, holding all other differences in the variables constant. The p-value is <0.001, meaning it is statistically significant. We reject the null hypothesis.
+
+A 1 point increase in the attendance of religious service leads to a 0.11 point increase in the view that premarital sex is wrong, holding all other differences in the variables constant. The p-value is >0.05, meaning it is not statistically significant. We ail to reject the null hypothesis.
+
+
+```{r}
+e5 <- lm.premar5$resid
+acf(e5, xlim = c(1,6), col = "red", lwd = 2)
+```
+
+The correlogram shows that the autocorrelation has been adjusted. There are no significant correlations. The series does not need further differeencing.
+
+```{r}
+pacf(e5, xlim = c(1,6), col = "red", lwd = 2)
+```
+
+The partial ACF describes the relationship between an observation and its lag that is not explained by correlations at all lower-order lags. The correlogram shows a spike in lag 2, meaning there may be a significant correlation at lag 2.
+
+```{r}
+plot(e5)
+```
+
+The residuals look randomly scattered.
+
+Bresuch-Godfrey Test
+```{r}
+bgtest(lm.premar5)
+```
+
+The p-value from the Breusch-Godfrey test is >0.05. We fail to reject the null hypothesis. There is no autocorrelation evident.
+
+This shows that differencing is useful for this model to achieve stationarity and reduce autocorrelation.
+
+ARIMA model
+```{r}
+library(forecast)
+auto.arima(e5, trace=TRUE)
+```
+
+Using the residuals from the first difference model, the ARIMA model that best fits the data is ARIMA(0,0,0) with zero mean. This means the errors are uncorrelated across time.
+
+
+# 7. Check your variables for unit roots.  Do some tests.  Interpret them.
+```{r}
+adfTest(by.year.ts[,"premar"], lags = 0, type="ct")
+```
+
+The Dickey Fuller value is -0.194. The p-value is 0.9881, which is not statistically significant (>0.05). This means that the data is non-stationary at lag 1. We fail to reject the null hypothesis. There is a unit root present.
+
+```{r}
+adfTest(by.year.ts[,"premar"], lags = 4, type="ct")
+```
+
+The Dickey Fuller value is -0.2405. The p-value is 0.9881, which is not statistically significant (>0.05). This means that the data is non-stationary at lag 4. We fail to reject the null hypothesis. There is a unit root present.
+
+
+Phillips-Perron test
+```{r}
+PP.test(by.year.ts[,"premar"],lshort=TRUE)
+```
+
+The p-value is >0.05, meaning it is not statistically significant. We fail to reject the null hypothesis that there is no unit root. There is evidence for a unit root.
+
+```{r}
+library(sandwich)
+coeftest(lm.premar3, vcov = NeweyWest(lm.premar3, lag = 2))
+```
+
+We could also apply autocorrelation-robust standard errors using the Newey-West standard errors and lag 2. I chose to do this on lm.premar3, which is the regression that has the independent variables--faith_pct + year + lib_pct + dem_pct + attend.  Both standard errors and heteroskedasticity in the time series are corrected.
+
+Comparing this to the regression model without the corrected standard errors, we can see that the standard errors for each independent variable have increased, which is usual when standard errors are corrected. But it is noticeable that the standard error for the year variable decreased. The t-statistics for each indpendent variable virtually have no difference. Also, the p-values for faith_pct, year, and dem_pct remain statistically significant to reject the null hypothesis. The p-values of lib_pct and attend remain statistically insignificant to fail to reject the null hypothesis.
+
+
+# 8. Perform an Automatic ARIMA on the residuals from one of your earlier models.  Tell me what it says.
+
+I ran an auto.arima test on the residuals from the model lm.premar2, where premar is the dependent variable and independent variables are faith_pct and year.
+
+```{r}
+library(forecast)
+auto.arima(e2, trace=TRUE)
+```
+
+The best model that fits the data is ARIMA(0,0,1). 0 means that we need to take into account the Y value (premar) at 0 lags from a given time point t. The following 0 means that the time series is stationary, so no need to take a first-order difference. 1 means that the model takes into account the error term from 1 lagged value.
+
+# 9. Run an ARIMA that follows from Step 8.  Interpret that, too.
+```{r}
+xvars.fat <- by.year.ts[,c("faith_pct", "year")]
+
+
+arima.001 <- arima(by.year.ts[,"premar"], order = c(0,0,1), xreg = xvars.fat)
+summary(arima.001)
+```
+
+Net of the time trend, each percent more of people who believe in God increases the view that premarital sex is wrong by 0.0261 points.
+
+Net of the belief in God, each year that passes decreases the view that premarital sex is wrong by -0.0042 points.
+
+Box-Ljung test
+```{r}
+Box.test(resid(arima.001), lag = 20, type = c("Ljung-Box"), fitdf = 1)
+```
+
+The p-value is > 0.05, which is not statistically significant. We fail to reject the hull hypothesis that the residuals are simply white noise. The model does not exhibit lack of fit. This means the auto.arima was able to identify the best model for lm.premar2, where views on premarital sex is the dependent variable and belief in God and year are the independent variables.
+
